@@ -21,7 +21,6 @@ mc.connect(databaseUrl, { useNewUrlParser: true, useUnifiedTopology: true }, (er
         console.log("connected to database")
 
     }
-
 })
 
 
