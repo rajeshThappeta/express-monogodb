@@ -1,6 +1,9 @@
 //create mini express app
 const exp = require('express')
 const userApi = exp.Router();
+const expressErrorHandler = require("express-async-handler")
+const bcryptjs = require("bcryptjs")
+const jwt = require("jsonwebtoken")
 //add body parsing middleware
 userApi.use(exp.json())
 
@@ -27,6 +30,7 @@ mc.connect(databaseUrl, { useNewUrlParser: true, useUnifiedTopology: true }, (er
         //get database object
         let databaseObj = client.db("vnrdb2021")
         //create usercollection object
+
         userCollectionObj = databaseObj.collection("usercollection")
         console.log("connected to database")
 
@@ -37,48 +41,43 @@ mc.connect(databaseUrl, { useNewUrlParser: true, useUnifiedTopology: true }, (er
 
 
 //http://localhost:3000/user/getusers
-userApi.get("/getusers", (req, res, next) => {
+//get users
+userApi.get("/getusers", expressErrorHandler(async (req, res) => {
 
-    //read docs from user collection
-    userCollectionObj.find().toArray((err, usersList) => {
+    let userList = await userCollectionObj.find().toArray()
+    res.send({ message: userList })
 
-        //deal with error
-        if (err) {
-            console.log("err in reading users data", err)
-            res.send({ message: err.message })
-        }
-        else {
-            res.send({ message: usersList })
-        }
-    })
-})
+}))
 
 
-//http://localhost:3000/user/getuser/<username>
-userApi.get("/getuser/:username", (req, res, next) => {
 
-    //get username from url params
+
+
+//get user by username
+userApi.get("/getuser/:username", expressErrorHandler(async (req, res, next) => {
+
+    //get username from url
     let un = req.params.username;
+    //search
+    let userObj = await userCollectionObj.findOne({ username: un })
 
-    //search for user
-    userCollectionObj.findOne({ username: un }, (err, userObj) => {
-        if (err) {
-            console.log("err in reading users data", err)
-            res.send({ message: err.message })
-        }
-
-        //if user not existed
-        if (userObj === null) {
-            res.send({ message: "User not found" })
-        }
-        //if user existed
-        else {
-            res.send({ message: userObj })
-        }
+    if (userObj === null) {
+        res.send({ message: "User not existed" })
+    }
+    else {
+        res.send({ message: userObj })
+    }
+}))
 
 
-    })
-})
+
+
+
+
+
+
+
+
 
 
 
@@ -89,78 +88,94 @@ userApi.get("/getuser/:username", (req, res, next) => {
 
 
 //http://localhost:3000/user/createuser
-userApi.post("/createuser", (req, res, next) => {
-
+//create user
+userApi.post("/createuser", expressErrorHandler(async (req, res, next) => {
     //get user obj
     let newUser = req.body;
-
-    //check user in db with  this username
-    userCollectionObj.findOne({ username: newUser.username }, (err, userObj) => {
-
-        if (err) {
-            console.log("err in reading users data", err)
-            res.send({ message: err.message })
-        }
-
-        //if user not existed
-        if (userObj === null) {
-            //create new user
-            userCollectionObj.insertOne(newUser, (err, success) => {
-                if (err) {
-                    console.log("err in reading users data", err)
-                    res.send({ message: err.message })
-                }
-                else {
-                    res.send({ message: "New user created" })
-                }
-            })
-        }
-        else {
-            res.send({ message: "User already existed" })
-        }
-
-    })
-})
-
-
-
+    //search for existing user
+    let user = await userCollectionObj.findOne({ username: newUser.username })
+    //if user existed
+    if (user !== null) {
+        res.send({ message: "User already existed" })
+    }
+    else {
+        //hash password
+        let hashedPassword = await bcryptjs.hash(newUser.password, 7)
+        //replace password
+        newUser.password = hashedPassword;
+        //insert
+        await userCollectionObj.insertOne(newUser)
+        res.send({ message: "User created" })
+    }
+}))
 
 
 
 
 //http://localhost:3000/user/updateuser/<username>
-userApi.put("/updateuser/:username", (req, res, next) => {
+
+userApi.put("/updateuser/:username", expressErrorHandler(async (req, res, next) => {
 
     //get modified user
     let modifiedUser = req.body;
-
     //update
-    userCollectionObj.updateOne({ username: modifiedUser.username }, {
-        $set: { ...modifiedUser }
-    }, (err, success) => {
+    await userCollectionObj.updateOne({ username: modifiedUser.username }, { $set: { ...modifiedUser } })
+    //send res
+    res.send({ message: "User modified" })
 
-        if (err) {
-            console.log("err in reading users data", err)
-            res.send({ message: err.message })
+}))
+
+
+
+
+//delete user
+userApi.delete("/deleteuser/:username", expressErrorHandler(async (req, res) => {
+
+    //get username from url
+    let un = req.params.username;
+    //find the user
+    let user = await userCollectionObj.findOne({ username: un })
+
+    if (user === null) {
+        res.send({ message: "User not existed" })
+    }
+    else {
+        await userCollectionObj.deleteOne({ username: un })
+        res.send({ message: "user removed" })
+    }
+}))
+
+
+
+
+//user login
+userApi.post('/login', expressErrorHandler(async (req, res) => {
+
+    //get user credetials
+    let credentials = req.body;
+    //search user by username
+    let user = await userCollectionObj.findOne({ username: credentials.username })
+    //if user not found
+    if (user === null) {
+        res.send({ message: "invalid username" })
+    }
+    else {
+        //compare the password
+        let result = await bcryptjs.compare(credentials.password, user.password)
+        //if not matched
+        if (result === false) {
+            res.send({ message: "Invalid password" })
         }
         else {
-            res.send({ message: "User updated" })
+            //create a token
+            let signedToken =  jwt.sign({ username: credentials.username }, 'abcdef', { expiresIn: 120 })
+            //send token to client
+            res.send({ message: "login success", token: signedToken,username: credentials.username })
         }
-    })
 
-})
+    }
 
-
-
-
-
-
-
-
-
-
-
-
+}))
 
 
 
